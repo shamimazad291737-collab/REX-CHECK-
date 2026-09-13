@@ -1,0 +1,14 @@
+{
+  "name": "telegram-otp-checker-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot to check multiple OTP links from a txt file",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "telegraf": "^4.16.3"
+  }
+}
