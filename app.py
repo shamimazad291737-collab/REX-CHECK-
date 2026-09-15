@@ -6,10 +6,11 @@ from telebot.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
 
-# এনভায়রনমেন্ট ভেরিয়েবল বা কনফিগারেশন
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
 MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGO_URI_HERE")
@@ -20,31 +21,38 @@ bot = telebot.TeleBot(TOKEN)
 client = MongoClient(MONGO_URI)
 db = client["telegram_number_bot"]
 users_collection = db["users"]
-numbers_collection = db["numbers"]  # আপলোড করা নাম্বারের স্টক
-settings_collection = db["settings"]  # অ্যাডমিন থেকে টেক্সট বা সেটিংস এডিট করার জন্য
-transactions_collection = db["transactions"]
+numbers_collection = db["numbers"]
+settings_collection = db["settings"]
+purchase_collection = db["purchase_history"]
 
 
-# ডিফল্ট সেটিংস ইনিশিয়ালাইজ করা (যদি না থাকে)
 def get_setting(key, default_val):
   setting = settings_collection.find_one({"key": key})
   return setting["value"] if setting else default_val
 
 
-def set_setting(key, val):
-  settings_collection.update_one(
-      {"key": key}, {"$set": {"value": val}}, upsert=True
+# ==================== মেইন রিপ্লাই কিবোর্ড (নিচের বাটন) ====================
+def main_menu_markup(user_id):
+  markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+  markup.add(
+      KeyboardButton("🛍️ বাই নাম্বার"),
+      KeyboardButton("👤 আমার প্রোফাইল"),
+      KeyboardButton("💰 ডিপোজিট"),
+      KeyboardButton("📜 আমার হিস্টরি"),
+      KeyboardButton("🛠️ সাপোর্ট"),
   )
+  if user_id == ADMIN_ID:
+    markup.add(KeyboardButton("⚙️ অ্যাডমিন প্যানেল"))
+  return markup
 
 
 # ==================== /start কমান্ড ====================
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
   user_id = message.from_user.id
-  username = message.from_user.username or "No Username"
   name = message.from_user.first_name
+  username = message.from_user.username or "No Username"
 
-  # ইউজার চেক বা রেজিস্ট্রেশন
   user = users_collection.find_one({"user_id": user_id})
   if user and user.get("is_banned", 0) == 1:
     bot.reply_to(message, "⚠️ আপনি এই বট থেকে ব্লক বা ব্যান হয়েছেন!")
@@ -61,92 +69,183 @@ def send_welcome(message):
         "is_banned": 0,
     })
 
-  markup = InlineKeyboardMarkup(row_width=2)
-  markup.add(
-      InlineKeyboardButton("🛍️ বাই নাম্বার", callback_data="buy_number_menu"),
-      InlineKeyboardButton("👤 আমার প্রোফাইল", callback_data="my_profile"),
-      InlineKeyboardButton("💰 ডিপোজিট", callback_data="deposit_menu"),
-      InlineKeyboardButton("📜 আমার হিস্টরি", callback_data="my_history"),
-      InlineKeyboardButton("🛠️ সাপোর্ট", callback_data="support"),
-  )
-
-  if user_id == ADMIN_ID:
-    markup.add(InlineKeyboardButton("⚙️ অ্যাডমিন প্যানেল", callback_data="admin_panel"))
-
   welcome_text = get_setting(
       "welcome_text",
-      "✨ **স্বাগতম!** আপনার প্রয়োজনীয় অপশনটি নিচের মেনু থেকে বেছে নিন:",
+      "✨ **স্বাগতম!** আপনার প্রয়োজনীয় অপশনটি নিচের কিবোর্ড থেকে বেছে নিন:",
   )
-  bot.send_message(message.chat.id, welcome_text, reply_markup=markup, parse_mode="Markdown")
+  bot.send_message(
+      message.chat.id,
+      welcome_text,
+      reply_markup=main_menu_markup(user_id),
+      parse_mode="Markdown",
+  )
 
 
-# ==================== বাটন কলব্যাক হ্যান্ডলার ====================
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-  user_id = call.from_user.id
+# ==================== টেক্সট মেসেজ হ্যান্ডলার (নিচের বাটনের কাজ) ====================
+@bot.message_handler(
+    func=lambda message: message.text
+    in [
+        "🛍️ বাই নাম্বার",
+        "👤 আমার প্রোফাইল",
+        "💰 ডিপোজিট",
+        "📜 আমার হিস্টরি",
+        "🛠️ সাপোর্ট",
+        "⚙️ অ্যাডমিন প্যানেল",
+    ]
+)
+def handle_text_menu(message):
+  user_id = message.from_user.id
+  text = message.text
 
   # ১. বাই নাম্বার মেনু
-  if call.data == "buy_number_menu":
+  if text == "🛍️ বাই নাম্বার":
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("🛒 বাই সিঙ্গেল নাম্বার", callback_data="buy_single"),
         InlineKeyboardButton("🛒 বাই মাল্টিপল নাম্বার", callback_data="buy_multi"),
-        InlineKeyboardButton("🔙 ফিরে যান", callback_data="main_menu"),
     )
-    bot.edit_message_text(
-        "📦 **নাম্বার ক্রয়ের অপশন:**\nদয়া করে আপনার পছন্দের ক্যাটাগরি সিলেক্ট করুন:",
-        call.message.chat.id,
-        call.message.message_id,
+    bot.send_message(
+        message.chat.id,
+        "📦 **নাম্বার ক্রয়ের ক্যাটাগরি সিলেক্ট করুন:**",
         reply_markup=markup,
         parse_mode="Markdown",
     )
 
-  # ২. সিঙ্গেল নাম্বার বাই
-  elif call.data == "buy_single":
-    # স্টক থেকে একটি নাম্বার বের করা (লজিক: numbers_collection থেকে আনসোল্ড নাম্বার নেওয়া)
-    num_data = numbers_collection.find_one({"is_sold": False})
-    if not num_data:
-      bot.answer_callback_query(call.id, "❌ দুঃখিত, বর্তমানে কোনো নাম্বার স্টকে নেই!", show_alert=True)
+  # ২. প্রোফাইল
+  elif text == "👤 আমার প্রোফাইল":
+    user = users_collection.find_one({"user_id": user_id})
+    if not user:
+      bot.send_message(message.chat.id, "❌ ডাটা পাওয়া যায়নি। /start লিখুন।")
       return
 
-    # ইউজার ব্যালেন্স চেক (ধরে নিলাম সিঙ্গেল নাম্বারের দাম নির্দিষ্ট বা ব্যালেন্স আছে)
-    user = users_collection.find_one({"user_id": user_id})
-    price = 50.0  # উদাহরণস্বরূপ দাম
-    if user["balance"] < price:
+    profile_text = (
+        f"👤 **আপনার প্রোফাইল বিবরণী:**\n\n"
+        f"🆔 ইউজার আইডি: `{user_id}`\n"
+        f"📛 নাম: {user.get('name', 'N/A')}\n"
+        f"💰 কারেন্ট ব্যালেন্স: ৳{user.get('balance', 0.0)}\n"
+        f"💵 মোট ডিপোজিট: ৳{user.get('total_deposit', 0.0)}\n"
+        f"🛒 মোট কেনা নাম্বার: {user.get('numbers_bought', 0)} টি"
+    )
+    bot.send_message(
+        message.chat.id, profile_text, parse_mode="Markdown"
+    )
+
+  # ৩. ডিপোজিট
+  elif text == "💰 ডিপোজিট":
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("💳 বিকাশ", callback_data="dep_bkash"),
+        InlineKeyboardButton("📱 নগদ", callback_data="dep_nagad"),
+        InlineKeyboardButton("🪙 বাইন্যান্স", callback_data="dep_binance"),
+    )
+    bot.send_message(
+        message.chat.id,
+        "💰 **পেমেন্ট মেথড সিলেক্ট করুন:**\nবিকাশ, নগদ বা বাইন্যান্সের মাধ্যমে পেমেন্ট করে অ্যাডমিনকে স্ক্রিনশট দিন।",
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+
+  # ৪. হিস্টরি
+  elif text == "📜 আমার হিস্টরি":
+    history = list(purchase_collection.find({"user_id": user_id}).limit(10))
+    if not history:
+      bot.send_message(message.chat.id, "📜 আপনার কোনো ক্রয়ের হিস্টরি নেই।")
+    else:
+      h_text = "📜 **আপনার সাম্প্রতিক কেনাকাটার ইতিহাস:**\n\n"
+      for h in history:
+        h_text += f"• নাম্বার: `{h['number']}` | OTP: {h['otp']}\n"
+      bot.send_message(message.chat.id, h_text, parse_mode="Markdown")
+
+  # ৫. সাপোর্ট
+  elif text == "🛠️ সাপোর্ট":
+    support_username = get_setting("support_username", "@YourSupportAdmin")
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton(
+            "🛠️ লাইভ সাপোর্টে যোগাযোগ করুন",
+            url=f"https://t.me/{support_username.replace('@','')}",
+        )
+    )
+    bot.send_message(
+        message.chat.id,
+        "🛠️ কোনো সমস্যা বা সাহায্যের জন্য নিচের লিংকে যোগাযোগ করুন:",
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+
+  # ৬. অ্যাডমিন প্যানেল
+  elif text == "⚙️ অ্যাডমিন প্যানেল" and user_id == ADMIN_ID:
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton(
+            "👥 ইউজার ম্যানেজমেন্ট (Active/Inactive)",
+            callback_data="adm_users",
+        ),
+        InlineKeyboardButton(
+            "📁 নাম্বার ফাইল আপলোড নির্দেশনা", callback_data="adm_upload_help"
+        ),
+        InlineKeyboardButton(
+            "⚙️ টেক্সট/সেটিংস এডিট", callback_data="adm_settings"
+        ),
+    )
+    bot.send_message(
+        message.chat.id,
+        "⚙️ **অ্যাডমিন কন্ট্রোল প্যানেল:**",
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+
+
+# ==================== ইনলাইন কলব্যাক হ্যান্ডলার ====================
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+  user_id = call.from_user.id
+
+  # সিঙ্গেল নাম্বার কেনা
+  if call.data == "buy_single":
+    num_data = numbers_collection.find_one({"is_sold": False})
+    if not num_data:
       bot.answer_callback_query(
-          call.id, f"❌ আপনার পর্যাপ্ত ব্যালেন্স নেই! প্রয়োজন: ৳{price}", show_alert=True
+          call.id,
+          "❌ দুঃখিত, বর্তমানে কোনো সিঙ্গেল নাম্বার স্টকে নেই!",
+          show_alert=True,
       )
       return
 
-    # ব্যালেন্স কাটুন এবং নাম্বার সোল্ড করুন
+    user = users_collection.find_one({"user_id": user_id})
+    price = 50.0  # ফিক্সড দাম (প্রয়োজনে পরিবর্তন করতে পারবেন)
+    if user["balance"] < price:
+      bot.answer_callback_query(
+          call.id,
+          f"❌ আপনার পর্যাপ্ত ব্যালেন্স নেই! প্রয়োজন: ৳{price}",
+          show_alert=True,
+      )
+      return
+
+    # ব্যালেন্স কাটা এবং নাম্বার আপডেট করা
     users_collection.update_one(
         {"user_id": user_id},
-        {
-            "$inc": {
-                "balance": -price,
-                "numbers_bought": 1,
-            }
-        },
+        {"$inc": {"balance": -price, "numbers_bought": 1}},
     )
     numbers_collection.update_one(
-        {"_id": num_data["_id"]}, {"$set": {"is_sold": True, "buyer_id": user_id}}
+        {"_id": num_data["_id"]},
+        {"$set": {"is_sold": True, "buyer_id": user_id}},
     )
 
-    # ইউজারের হিস্টরিতে যুক্ত করা
-    db["purchase_history"].insert_one({
+    # পারচেজ হিস্টরি সেভ
+    p_id = purchase_collection.insert_one({
         "user_id": user_id,
         "number": num_data["number"],
         "link": num_data.get("link", "N/A"),
         "otp": "Pending",
         "type": "Single",
-    })
+    }).inserted_id
 
-    # ইউজারকে নাম্বার পাঠানো
+    # ইউজারকে নাম্বার পাঠানো (সাথে লিংক ও চেক ওটিপি বাটন)
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🔄 চেক ওটিপি", callback_data=f"check_otp_{num_data['_id']}")
+        InlineKeyboardButton("🔄 চেক ওটিপি", callback_data=f"chk_otp_{p_id}")
     )
-    markup.add(InlineKeyboardButton("🏠 মূল মেনু", callback_data="main_menu"))
 
     msg = (
         f"✅ **সফলভাবে নাম্বার ক্রয় করা হয়েছে!**\n\n"
@@ -154,137 +253,54 @@ def callback_query(call):
         f"🔗 লিংক: {num_data.get('link', 'N/A')}\n\n"
         f"ওটিপি দেখতে নিচে 'চেক ওটিপি' বাটনে ক্লিক করুন।"
     )
-    bot.edit_message_text(
-        msg, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown"
-    )
+    bot.send_message(call.message.chat.id, msg, reply_markup=markup, parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
 
-  # ৩. মাল্টিপল নাম্বার বাই
   elif call.data == "buy_multi":
-    bot.answer_callback_query(call.id, "🛠️ মাল্টিপল নাম্বার সিস্টেম শীঘ্রই চালু হচ্ছে!", show_alert=True)
-
-  # ৪. প্রোফাইল
-  elif call.data == "my_profile":
-    user = users_collection.find_one({"user_id": user_id})
-    if not user:
-      bot.answer_callback_query(call.id, "❌ ইউজার ডাটা পাওয়া যায়নি। /start লিখুন।")
-      return
-
-    profile_text = (
-        f"👤 **আপনার প্রফাইল বিবরণী:**\n\n"
-        f"🆔 ইউজার আইডি: `{user_id}`\n"
-        f"📛 নাম: {user.get('name', 'N/A')}\n"
-        f"💰 কারেন্ট ব্যালেন্স: ৳{user.get('balance', 0.0)}\n"
-        f"💵 মোট ডিপোজিট: ৳{user.get('total_deposit', 0.0)}\n"
-        f"🛒 মোট কেনা নাম্বার: {user.get('numbers_bought', 0)} টি"
-    )
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔙 ফিরে যান", callback_data="main_menu"))
-    bot.edit_message_text(
-        profile_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown"
+    bot.answer_callback_query(
+        call.id,
+        "🛠️ মাল্টিপল নাম্বার সিস্টেম শীঘ্রই চালু হচ্ছে!",
+        show_alert=True,
     )
 
-  # ৫. ডিপোজিট মেনু
-  elif call.data == "deposit_menu":
-    markup = InlineKeyboardMarkup(row_width=3)
-    markup.add(
-        InlineKeyboardButton("💳 বিকাশ", callback_data="dep_bkash"),
-        InlineKeyboardButton("📱 নগদ", callback_data="dep_nagad"),
-        InlineKeyboardButton("🪙 বাইন্যান্স", callback_data="dep_binance"),
-    )
-    markup.add(InlineKeyboardButton("🔙 ফিরে যান", callback_data="main_menu"))
-    bot.edit_message_text(
-        "💰 **পেমেন্ট মেথড সিলেক্ট করুন:**\nনিচের মাধ্যমগুলোর যেকোনো একটির মাধ্যমে ব্যালেন্স অ্যাড করতে পারেন:",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode="Markdown",
-    )
-
+  # ডিপোজিট অপশন ক্লিক
   elif call.data.startswith("dep_"):
     method = call.data.split("_")[1].upper()
     bot.answer_callback_query(
-        call.id, f"আপনার {method} পেমেন্ট রিকোয়েস্ট প্রসেস করা হচ্ছে। অ্যাডমিনের সাথে যোগাযোগ করুন।"
+        call.id,
+        f"আপনার {method} পেমেন্টের জন্য অ্যাডমিনের সাথে যোগাযোগ করুন।",
+        show_alert=True,
     )
 
-  # ৬. আমার হিস্টরি
-  elif call.data == "my_history":
-    history = list(db["purchase_history"].find({"user_id": user_id}).limit(5))
-    if not history:
-      text = "📜 আপনার কোনো ক্রয়ের হিস্টরি নেই।"
-    else:
-      text = "📜 **আপনার সাম্প্রতিক কেনাকাটার ইতিহাস:**\n\n"
-      for h in history:
-        text += f"• নাম্বার: `{h['number']}` | স্ট্যাটাস: {h['otp']}\n"
+  # ওটিপি চেক বাটন
+  elif call.data.startswith("chk_otp_"):
+    p_id = call.data.split("_")[2]
+    purchase = purchase_collection.find_one({"_id": ObjectId(p_id)})
+    if purchase:
+      bot.answer_callback_query(
+          call.id,
+          f"বর্তমান OTP স্ট্যাটাস: {purchase['otp']}",
+          show_alert=True,
+      )
 
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔙 ফিরে যান", callback_data="main_menu"))
-    bot.edit_message_text(
-        text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown"
-    )
-
-  # ৭. সাপোর্ট
-  elif call.data == "support":
-    support_username = get_setting("support_username", "@YourSupportAdmin")
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🛠️ লাইভ সাপোর্টে যোগাযোগ করুন", url=f"https://t.me/{support_username.replace('@','')}"))
-    markup.add(InlineKeyboardButton("🔙 ফিরে যান", callback_data="main_menu"))
-    bot.edit_message_text(
-        "🛠️ কোনো সমস্যা হলে নিচের লিংকে ক্লিক করে সরাসরি সাপোর্টে যোগাযোগ করুন:",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode="Markdown",
-    )
-
-  # ৮. মেইন মেনু ব্যাক
-  elif call.data == "main_menu":
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🛍️ বাই নাম্বার", callback_data="buy_number_menu"),
-        InlineKeyboardButton("👤 আমার প্রোফাইল", callback_data="my_profile"),
-        InlineKeyboardButton("💰 ডিপোজিট", callback_data="deposit_menu"),
-        InlineKeyboardButton("📜 আমার হিস্টরি", callback_data="my_history"),
-        InlineKeyboardButton("🛠️ সাপোর্ট", callback_data="support"),
-    )
-    if user_id == ADMIN_ID:
-      markup.add(InlineKeyboardButton("⚙️ অ্যাডমিন প্যানেল", callback_data="admin_panel"))
-
-    welcome_text = get_setting("welcome_text", "✨ **স্বাগতম!** অপশন সিলেক্ট করুন:")
-    bot.edit_message_text(
-        welcome_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown"
-    )
-
-  # ৯. অ্যাডমিন প্যানেল
-  elif call.data == "admin_panel" and user_id == ADMIN_ID:
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("👥 ইউজার ম্যানেজমেন্ট", callback_data="adm_users"),
-        InlineKeyboardButton("📁 নাম্বার ফাইল আপলোড", callback_data="adm_upload"),
-        InlineKeyboardButton("✏️ টেক্সট/সেটিংস এডিট", callback_data="adm_settings"),
-        InlineKeyboardButton("🔙 মূল মেনু", callback_data="main_menu"),
-    )
-    bot.edit_message_text(
-        "⚙️ **অ্যাডমিন কন্ট্রোল প্যানেল:**\nনিচ থেকে অপশন বেছে নিন:",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode="Markdown",
-    )
-
-  # ১০. অ্যাডমিন: ইউজার ম্যানেজমেন্ট (অ্যাক্টিভ ও ইনঅ্যাক্টিভ)
+  # অ্যাডমিন: ইউজার ম্যানেজমেন্ট
   elif call.data == "adm_users" and user_id == ADMIN_ID:
-    active_users = users_collection.count_documents({"numbers_bought": {"$gt": 0}})
-    inactive_users = users_collection.count_documents({"numbers_bought": 0})
-    total_users = users_collection.count_documents({})
+    active_count = users_collection.count_documents({"numbers_bought": {"$gt": 0}})
+    inactive_count = users_collection.count_documents({"numbers_bought": 0})
 
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton(f"🟢 অ্যাক্টিভ বায়ার ({active_users})", callback_data="adm_active_list"),
-        InlineKeyboardButton(f"⚪ ইনঅ্যাক্টিভ ইউজার ({inactive_users})", callback_data="adm_inactive_list"),
-        InlineKeyboardButton("🔙 অ্যাডমিন প্যানেল", callback_data="admin_panel"),
+        InlineKeyboardButton(
+            f"🟢 অ্যাক্টিভ বায়ার তালিকা ({active_count})",
+            callback_data="adm_active_list",
+        ),
+        InlineKeyboardButton(
+            f"⚪ ইনঅ্যাক্টিভ ইউজার তালিকা ({inactive_count})",
+            callback_data="adm_inactive_list",
+        ),
     )
     bot.edit_message_text(
-        f"👥 **ইউজার ম্যানেজমেন্ট পরিসংখ্যান:**\n\nমোট ইউজার: {total_users}\nঅ্যাক্টিভ বায়ার: {active_users}\nইনঅ্যাক্টিভ: {inactive_users}",
+        "👥 **ইউজার ম্যানেজমেন্ট সেকশন:**\nকোন ক্যাটাগরির ইউজার দেখতে চান সিলেক্ট করুন:",
         call.message.chat.id,
         call.message.message_id,
         reply_markup=markup,
@@ -292,47 +308,98 @@ def callback_query(call):
     )
 
   elif call.data == "adm_active_list" and user_id == ADMIN_ID:
-    users = list(users_collection.find({"numbers_bought": {"$gt": 0}}).limit(10))
-    text = "🟢 **অ্যাক্টিভ বায়ার তালিকা:**\n\n"
+    users = list(users_collection.find({"numbers_bought": {"$gt": 0}}).limit(20))
     markup = InlineKeyboardMarkup(row_width=1)
     for u in users:
-      markup.add(InlineKeyboardButton(f"👤 {u.get('name','User')} (ID: {u['user_id']})", callback_data=f"adm_user_detail_{u['user_id']}"))
-    markup.add(InlineKeyboardButton("🔙 ফিরে যান", callback_data="adm_users"))
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+      markup.add(
+          InlineKeyboardButton(
+              f"👤 {u.get('name')} (ID: {u['user_id']}) - কেনাকাটা: {u['numbers_bought']}",
+              callback_data=f"adm_u_detail_{u['user_id']}",
+          )
+      )
+    bot.edit_message_text(
+        "🟢 **অ্যাক্টিভ বায়ারদের তালিকা:** (ডিটেইলস দেখতে নামের ওপর ক্লিক করুন)",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
 
-  elif call.data.startswith("adm_user_detail_") and user_id == ADMIN_ID:
-    target_id = int(call.data.split("_")[-1])
+  elif call.data == "adm_inactive_list" and user_id == ADMIN_ID:
+    users = list(users_collection.find({"numbers_bought": 0}).limit(20))
+    markup = InlineKeyboardMarkup(row_width=1)
+    for u in users:
+      markup.add(
+          InlineKeyboardButton(
+              f"👤 {u.get('name')} (ID: {u['user_id']})",
+              callback_data=f"adm_u_detail_{u['user_id']}",
+          )
+      )
+    bot.edit_message_text(
+        "⚪ **ইনঅ্যাক্টিভ ইউজারদের তালিকা:**",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+
+  elif call.data.startswith("adm_u_detail_") and user_id == ADMIN_ID:
+    target_id = int(call.data.split("_")[3])
     u_data = users_collection.find_one({"user_id": target_id})
-    purchases = list(db["purchase_history"].find({"user_id": target_id}))
+    purchases = list(purchase_collection.find({"user_id": target_id}))
 
     detail = (
-        f"👤 **ইউজার ডিটেইলস:**\n"
+        f"👤 **ইউজার প্রোফাইল বিবরণী:**\n"
         f"• আইডি: `{target_id}`\n"
         f"• নাম: {u_data.get('name')}\n"
-        f"• ব্যালেন্স: ৳{u_data.get('balance')}\n"
-        f"• কেনা নাম্বার সংখ্যা: {u_data.get('numbers_bought')}\n\n"
-        f"**নাম্বার হিস্টরি ও লিংক:**\n"
+        f"• কারেন্ট ব্যালেন্স: ৳{u_data.get('balance')}\n"
+        f"• মোট কেনা নাম্বার: {u_data.get('numbers_bought')} টি\n\n"
+        f"📜 **নাম্বার ও লিংক হিস্টরি:**\n"
     )
     for p in purchases:
-      detail += f" - `{p['number']}` | Link: {p['link']} | OTP: {p['otp']}\n"
+      detail += f"📱 `{p['number']}` | Link: {p.get('link','N/A')} | OTP: {p['otp']}\n"
 
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("💵 ব্যালেন্স অ্যাড/রিফান্ড", callback_data=f"adm_refund_{target_id}"))
-    markup.add(InlineKeyboardButton("🔙 ফিরে যান", callback_data="adm_users"))
-    bot.edit_message_text(detail, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    markup.add(
+        InlineKeyboardButton(
+            "💵 ব্যালেন্স রিফান্ড/অ্যাড করুন",
+            callback_data=f"adm_addbal_{target_id}",
+        )
+    )
+    bot.edit_message_text(
+        detail, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown"
+    )
+
+  elif call.data.startswith("adm_addbal_") and user_id == ADMIN_ID:
+    target_id = int(call.data.split("_")[2])
+    # ইউজারকে ১০০ টাকা ব্যালেন্স রিফান্ড বা অ্যাড করার উদাহরণ
+    users_collection.update_one(
+        {"user_id": target_id}, {"$inc": {"balance": 100.0}}
+    )
+    bot.answer_callback_query(
+        call.id,
+        f"✅ সফলভাবে ইউজার ({target_id})-এর অ্যাকাউন্টে ১০০ টাকা যোগ করা হয়েছে!",
+        show_alert=True,
+    )
+
+  elif call.data == "adm_upload_help" and user_id == ADMIN_ID:
+    bot.answer_callback_query(
+        call.id,
+        "বটে সরাসরি .txt ফাইল সেন্ড করুন। ফরম্যাট: নাম্বার,লিংক",
+        show_alert=True,
+    )
 
 
-# ==================== ফাইল আপলোড হ্যান্ডলার (অ্যাডমিন) ====================
+# ==================== ফাইল আপলোড হ্যান্ডলার (অ্যাডমিন স্টক আপলোড) ====================
 @bot.message_handler(content_types=["document"])
 def handle_file_upload(message):
   if message.from_user.id != ADMIN_ID:
     return
 
-  # ফাইল ডাউনলোড ও প্রসেস করা (যেমন: number, link ফরম্যাটের টেক্সট ফাইল)
   file_info = bot.get_file(message.document.file_id)
   downloaded_file = bot.download_file(file_info.file_path)
 
-  file_path = "uploaded_numbers.txt"
+  file_path = "temp_numbers.txt"
   with open(file_path, "wb") as f:
     f.write(downloaded_file)
 
@@ -351,10 +418,12 @@ def handle_file_upload(message):
         })
         count += 1
 
-  bot.reply_to(message, f"✅ সফলভাবে {count} টি নাম্বার ডাটাবেজে যুক্ত করা হয়েছে!")
+  bot.reply_to(
+      message,
+      f"✅ সফলভাবে স্টক ফাইলে থাকা {count} টি নাম্বার ডাটাবেজে যুক্ত করা হয়েছে!",
+  )
 
 
-# বট রান করার জন্য
 if __name__ == "__main__":
   print("🤖 বট সফলভাবে রান হচ্ছে...")
   bot.infinity_polling()
