@@ -258,4 +258,4 @@ def ban_user(call):
 if __name__ == "__main__":
   print("Bot with MongoDB is running...")
   bot.infinity_polling()
-                 bot.infinity_polling()
+  
