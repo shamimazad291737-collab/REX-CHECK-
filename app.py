@@ -12,13 +12,20 @@ from telebot.types import (
 
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
-MONGO_URI = os.getenv("MONGO_URI", "YOUR_MONGO_URI_HERE")
+
+# আপনার দেওয়া MongoDB URI এবং সাথে ডেটাবেজের নাম 'telegram_bot' যুক্ত করা হলো
+MONGO_URI = os.getenv(
+    "MONGO_URI",
+    "mongodb+srv://shamimazad291736_db_user:CwJ0XbyRhDrRfgRJ@cluster0.mswnw5q.mongodb.net/telegram_bot?retryWrites=true&w=majority&appName=Cluster0",
+)
 
 bot = telebot.TeleBot(TOKEN)
 
-# মঙ্গোডিবি কানেকশন (আপনার পুরোনো বা নির্দিষ্ট URI দিয়ে রেলওয়েতে কাজ করবে)
+# মঙ্গোডিবি কানেকশন
 client = MongoClient(MONGO_URI)
-db = client.get_default_database()  # URI-এর ভেতরে ডেটাবেজ নাম না থাকলে ডিফল্ট ডেটাবেজ ধরবে
+db = client[
+    "telegram_bot"
+]  # ডেটাবেজ সঠিকভাবে ডিক্লেয়ার করা হলো যাতে ক্র্যাশ না করে
 users_collection = db["users"]
 numbers_collection = db["numbers"]
 settings_collection = db["settings"]
@@ -48,7 +55,9 @@ def main_menu_markup(user_id):
       KeyboardButton("🛠️ সাপোর্ট"),
   )
   if user_id == ADMIN_ID:
-    markup.add(KeyboardButton("⚙️ অ্যাডমিন প্যানেল"))
+    markup.add(
+        KeyboardButton("⚙️ অ্যাডমিন প্যানেল")
+    )  # অ্যাডমিন প্যানেল বাটন যুক্ত করা হলো
   return markup
 
 
@@ -316,7 +325,7 @@ def callback_query(call):
           )
       )
     bot.edit_message_text(
-        "👥 **সকল ইউজারের তালিকা ও হিস্টরি:** (ডিটैलস দেখতে ক্লিক করুন)",
+        "👥 **সকল ইউজারের তালিকা ও হিস্টরি:** (ডিটেইলস দেখতে ক্লিক করুন)",
         call.message.chat.id,
         call.message.message_id,
         reply_markup=markup,
@@ -435,4 +444,4 @@ def handle_text_inputs(message):
 if __name__ == "__main__":
   print("🤖 বট সফলভাবে রান হচ্ছে...")
   bot.infinity_polling()
-    
+      
