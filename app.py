@@ -1,7 +1,6 @@
 from datetime import datetime
 import os
 from bson.objectid import ObjectId
-from flask import Flask, request
 from pymongo import MongoClient
 import telebot
 from telebot.types import (
@@ -11,15 +10,6 @@ from telebot.types import (
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
-
-# Flask app initialization for Render/Railway Port Binding
-app = Flask(__name__)
-
-
-@app.route("/")
-def home():
-  return "Bot is running perfectly with MongoDB!"
-
 
 # Environment Variables
 TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
@@ -308,13 +298,13 @@ def callback_query(call):
         f"Bought number: {num_data.get('number')}",
     )
 
-    p_id = orders_col.insert_one({
+    orders_col.insert_one({
         "user_id": user_id,
         "number": num_data.get("number"),
         "otp": "Pending",
         "type": "Single",
         "timestamp": datetime.utcnow(),
-    }).inserted_id
+    })
 
     msg = (
         f"✅ **সফলভাবে নাম্বার ক্রয় করা হয়েছে!**\n\n"
@@ -324,7 +314,6 @@ def callback_query(call):
     bot.answer_callback_query(call.id)
 
   elif call.data == "adm_all_history" and int(user_id) == int(ADMIN_ID):
-    # MongoDB থেকে সকল ইউজারের সাম্প্রতিক হিস্টরি ফেচ করা
     all_history = list(
         user_history_col.find({}).sort("timestamp", -1).limit(15)
     )
@@ -436,7 +425,6 @@ def handle_all_messages(message):
   username = message.from_user.username or "No Username"
   text = message.text or ""
 
-  # অ্যাডমিন কমান্ড হ্যান্ডলিং
   if int(user_id) == int(ADMIN_ID):
     if text.startswith("/setbkash"):
       num = text.split(" ", 1)[1]
@@ -518,8 +506,7 @@ def handle_all_messages(message):
 
 
 if __name__ == "__main__":
-  port = int(os.environ.get("PORT", 10000))
-  print(f"🤖 বট সফলভাবে পোর্ট {port}-এ রান হচ্ছে...")
+  print("🤖 বট পোলিং মোডে সফলভাবে রান হচ্ছে...")
   bot.remove_webhook()
-  app.run(host="0.0.0.0", port=port)
+  bot.infinity_polling()
       
