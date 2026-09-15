@@ -1,16 +1,16 @@
 from datetime import datetime
+import os
 from pymongo import MongoClient
 import telebot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  # আপনার বটের টোকেন এখানে দিন
-ADMIN_ID = 123456789  # আপনার টেলিগ্রাম অ্যাডমিন আইডি দিন
+# এনভায়রনমেন্ট ভেরিয়েবল থেকে কনফিগারেশন লোড করা
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+MONGO_URI = os.getenv("MONGO_URI")
 
-# MongoDB কানেকশন স্ট্রিং (আপনার MongoDB Atlas URI এখানে দিন)
-MONGO_URI = "mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority"
+# MongoDB কানেকশন
 client = MongoClient(MONGO_URI)
-
-# ডেটাবেজ ও কালেকশন সিলেক্ট করা
 db = client["telegram_otp_bot"]
 users_collection = db["users"]
 stock_collection = db["stock"]
@@ -119,7 +119,6 @@ def buy_multi_process(call):
 
 # নাম্বার প্রসেসিং ও স্টক থেকে কাটার ফাংশন (MongoDB)
 def process_purchase(chat_id, user_id, quantity, call_id):
-  # স্টক থেকে নির্দিষ্ট পরিমাণ নাম্বার ফেচ করা
   items = list(stock_collection.limit(quantity))
 
   if len(items) < quantity:
@@ -138,7 +137,6 @@ def process_purchase(chat_id, user_id, quantity, call_id):
     number = item["number"]
     otp_link = item["otp_link"]
 
-    # স্টক থেকে ডিলিট এবং হিস্টরিতে সেভ করা
     stock_collection.delete_one({"_id": stock_id})
     history_collection.insert_one({
         "user_id": user_id,
@@ -260,3 +258,4 @@ def ban_user(call):
 if __name__ == "__main__":
   print("Bot with MongoDB is running...")
   bot.infinity_polling()
+                 bot.infinity_polling()
