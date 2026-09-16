@@ -1050,21 +1050,21 @@ def handle_update(update):
                         return
 
                 # Admin File Upload
-                elif is_admin and state_data == "ADMIN_UPLOAD_FILE":
-                    if "document" in msg:
-                        doc = msg["document"]
-                        file_name = doc.get("file_name", "").lower()
-                        if not (file_name.endswith(".txt") or file_name.endswith(".csv")):
-                            send_message(chat_id, "❌ <b>দয়া করে শুধুমাত্র .txt অথবা .csv ফাইল আপলোড করুন!</b>", reply_markup=get_back_keyboard())
-                            return
+    elif is_admin and state_data == "ADMIN_UPLOAD_FILE":
+        if "document" in msg:
+            doc = msg["document"]
+            file_name = doc.get("file_name", "").lower()
+            if not (file_name.endswith(".txt") or file_name.endswith(".csv")):
+                send_message(chat_id, "❌ <b>দয়া করে শুধুমাত্র .txt অথবা .csv ফাইল আপলোড করুন!</b>")
+                return
 
-                        file_id = doc["file_id"]
-                        file_info = requests.get(BASE_URL + f"getFile?file_id={file_id}").json()
-                        if file_info.get("ok"):
-                            file_path = file_info["result"]["file_path"]
-                            content = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").text
-                            
-                            count = 0
+            file_id = doc["file_id"]
+            file_info = requests.get(BASE_URL + f"getFile?file_id={file_id}").json()
+            if file_info.get("ok"):
+                file_path = file_info["result"]["file_path"]
+                content = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").text
+
+                count = 0
                 for line in content.splitlines():
                     line = line.strip().lstrip("\ufeff")
                     if not line:
@@ -1078,13 +1078,13 @@ def handle_update(update):
                         if phone.startswith("+") and (otp_link.startswith("http://") or otp_link.startswith("https://")):
                             add_stock_item(phone, otp_link)
                             count += 1
-                            
-                            send_message(chat_id, f"✅ <b>সফলভাবে {count} টি নম্বর স্টকে আপলোড করা হয়েছে!</b>", reply_markup=get_main_keyboard(is_admin))
-                            delete_user_state(user_id)
-                            return
-                    else:
-                        send_message(chat_id, "❌ <b>অনুগ্রহ করে একটি সঠিক টেক্সট (.txt / .csv) ফাইল আপলোড করুন।</b>", reply_markup=get_back_keyboard())
-                        return
+
+                send_message(chat_id, f"✅ <b>সফলভাবে {count} টি নম্বর স্টকে আপলোড করা হয়েছে!</b>")
+                delete_user_state(user_id)
+                return
+            else:
+                send_message(chat_id, "❌ <b>ফাইল ডাউনলোড করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।</b>")
+                return
 
                 # Admin Custom Deposit Input
                 elif isinstance(state_data, str) and state_data.startswith("ADMIN_APPROVE_AMOUNT_"):
