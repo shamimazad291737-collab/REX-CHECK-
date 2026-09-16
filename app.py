@@ -74,7 +74,7 @@ mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["telegram_otp_bot"]
 
 users_col = db["users"]
-stock_col = db[f"stock_{TOKEN.replace(':', '_')}"]
+stock_col = db[f"stock_{TOKEN.replace(':', '_')}"] if TOKEN else db["stock_default"]
 vpn_stock_col = db["vpn_stock"]
 vpn_orders_col = db["vpn_orders"]
 orders_col = db["active_orders"]
@@ -162,9 +162,6 @@ def to_decimal(value):
         if hasattr(value, "to_decimal"):
             return value.to_decimal()
         if isinstance(value, float):
-            # Existing MongoDB records may contain values such as
-            # 0.6000000000000003 due to old float arithmetic.
-            # Normalize those legacy artifacts before displaying/converting.
             return Decimal(str(round(value, 12)))
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
@@ -178,7 +175,6 @@ def format_money_exact(value):
     return s if s else "0"
 
 def format_number_price(price):
-    # Exact display: 0.125 stays 0.125, never 0.13 or 0.125000000000003.
     return format_money_exact(price)
 
 def get_number_price():
@@ -327,7 +323,6 @@ def pop_stock_item():
     return None, None
 
 def delete_active_order(order_id):
-    """Remove a just-created order when Telegram delivery fails."""
     try:
         if order_id is not None:
             orders_col.delete_one({"_id": order_id})
@@ -356,7 +351,6 @@ def update_order_otp(phone, otp_code, app_type="WA", lang="EN"):
         {"_id": latest_order["_id"]},
         {"$set": {"otp_code": otp_code, "app_type": app_type, "lang": lang}}
     )
-
 
 def get_user_orders_all(user_id):
     rows = list(orders_col.find({"user_id": user_id}).sort("_id", -1))
@@ -572,7 +566,6 @@ def render_buyer_page(target_u_id, page=1, items_per_page=10):
             status = f"✅ Received ({otp_c}) [{app_t}]" if otp_c else "❌ OTP Pending / Not Received"
             buyer_msg += f"<b>{idx}.</b> 📱 <code>{p_num}</code>\n   📅 Date: {p_date}\n   🔗 Link: {otp_l}\n   📌 Status: {status}\n   🌐 Lang: [{lang_t}]\n\n"
 
-    # Pagination Nav Buttons
     nav_buttons = []
     if total_pages > 1:
         row = []
@@ -588,14 +581,11 @@ def render_buyer_page(target_u_id, page=1, items_per_page=10):
 
     return buyer_msg, {"inline_keyboard": nav_buttons}
 
-
-# Helper Generator for User Details Page Pagination
 def render_user_page(target_u_id, page=1, items_per_page=10):
     u_info = get_user(target_u_id)
     if not u_info:
         return "❌ <b>ইউজার পাওয়া যায়নি!</b>", {"inline_keyboard": []}
 
-    # Full purchase history for this specific user
     orders = get_user_orders_all(target_u_id)
     total_purchased = len(orders)
 
@@ -629,7 +619,6 @@ def render_user_page(target_u_id, page=1, items_per_page=10):
                 f"   🔗 <b>Link:</b> {otp_l}\n\n"
             )
 
-    # Pagination Nav Buttons
     nav_buttons = []
     if total_pages > 1:
         row = []
@@ -645,11 +634,9 @@ def render_user_page(target_u_id, page=1, items_per_page=10):
 
     return user_msg, {"inline_keyboard": nav_buttons}
 
-
 # Core Update Handler
 def handle_update(update):
     try:
-        # Block Group Execution (Only Private Chat Allowed)
         msg_data = update.get("message") or update.get("callback_query", {}).get("message")
         if msg_data:
             chat_type = msg_data.get("chat", {}).get("type", "")
@@ -670,12 +657,10 @@ def handle_update(update):
             bdt_rate = get_bdt_per_usd()
             bot_active = (get_bot_status() == "ON")
 
-            # Admin Reply Handler for VPN Orders
             if is_admin and "reply_to_message" in msg:
                 reply_msg = msg["reply_to_message"]
                 reply_text = reply_msg.get("text", "")
                 if "VPN ORDER #" in reply_text:
-                    match = re.search(r'VPN ORDER #([a-f0-9]+)', reply_text)
                     user_match = re.search(r'User ID: (\d+)', reply_text)
                     if user_match:
                         target_u_id = int(user_match.group(1))
@@ -700,18 +685,15 @@ def handle_update(update):
                         send_message(chat_id, f"✅ <b>Order completed!</b>\nVPN details successfully sent to User ID <code>{target_u_id}</code>.")
                         return
 
-            # Handle Back Button Globally
             if text in ["⬅️ Back", "🔙 Back"]:
                 delete_user_state(user_id)
                 send_message(chat_id, "<b>মূল মেনুতে ফিরে আসা হয়েছে:</b>", reply_markup=get_main_keyboard(is_admin))
                 return
 
-            # Check Bot OFF Status for Normal Users
             if not is_admin and not bot_active:
                 send_message(chat_id, "⚠️ <b>সাময়িক সময়ের জন্য বট আপডেট করা হচ্ছে!</b>\nআপনারা একটু ধৈর্য ধরুন, এরপর জানিয়ে দেওয়া হবে। আপাতত কেউ ডিপোজিট বা নম্বর ক্রয় করবেন না। 🛑")
                 return
 
-            # Force Join Verification Guard for Normal Users
             if not is_admin:
                 is_joined, missing = verify_force_join(user_id)
                 if not is_joined:
@@ -736,10 +718,8 @@ def handle_update(update):
                     )
                     return
 
-            # Input State Handling from Database
             state_data = get_user_state(user_id)
             if state_data:
-                # Set VPN Prices
                 if is_admin and state_data in ["ADMIN_SET_NORD_PRICE", "ADMIN_SET_PROTON_PRICE"]:
                     service = "nord" if state_data == "ADMIN_SET_NORD_PRICE" else "proton"
                     try:
@@ -751,7 +731,6 @@ def handle_update(update):
                     delete_user_state(user_id)
                     return
 
-                # Admin Upload VPN Stock File Step 2
                 if is_admin and isinstance(state_data, dict) and state_data.get("step") == "ADMIN_UPLOAD_VPN_FILE":
                     service = state_data.get("service")
                     if "document" in msg:
@@ -781,7 +760,6 @@ def handle_update(update):
                         send_message(chat_id, "❌ <b>অনুগ্রহ করে একটি সঠিক টেক্সট (.txt / .csv) ফাইল আপলোড করুন।</b>", reply_markup=get_back_keyboard())
                         return
 
-                # Multiple Number Quantity Input
                 if isinstance(state_data, str) and state_data == "BUY_MULTI_QTY":
                     try:
                         qty = int(text.strip())
@@ -789,8 +767,6 @@ def handle_update(update):
                             send_message(chat_id, "❌ <b>সঠিক সংখ্যা লিখুন (কমপক্ষে ১ টি)।</b>")
                             return
 
-                        # Telegram messages have a practical size limit. Keeping the
-                        # batch bounded also prevents a very large request from timing out.
                         if qty > 20:
                             send_message(chat_id, "❌ <b>একসাথে সর্বোচ্চ ২০টি নম্বর কিনতে পারবেন।</b> প্রয়োজনে আবার Buy Multiple Numbers চাপুন।")
                             delete_user_state(user_id)
@@ -803,7 +779,7 @@ def handle_update(update):
                         if to_decimal(bal) < to_decimal(total_cost):
                             send_message(
                                 chat_id,
-                                f"❌ <b>পর্যাপ্ত ব্যালেন্স নেই!</b>\\n"
+                                f"❌ <b>পর্যাপ্ত ব্যালেন্স নেই!</b>\n"
                                 f"{qty} টি নম্বর কিনতে ${format_number_price(total_cost)} USD লাগবে। "
                                 f"আপনার ব্যালেন্স: ${format_money_exact(bal)} USD।"
                             )
@@ -814,14 +790,12 @@ def handle_update(update):
                         if len(stock_items) < qty:
                             send_message(
                                 chat_id,
-                                f"⚠️ <b>দুঃখিত! স্টকে পর্যাপ্ত নম্বর নেই।</b>\\n"
+                                f"⚠️ <b>দুঃখিত! স্টকে পর্যাপ্ত নম্বর নেই।</b>\n"
                                 f"বর্তমানে স্টকে {len(stock_items)} টি নম্বর খালি রয়েছে।"
                             )
                             delete_user_state(user_id)
                             return
 
-                        # Reserve stock and create orders first, but DO NOT charge yet.
-                        # The user is charged only after Telegram confirms delivery.
                         purchased_list = []
                         created_order_ids = []
 
@@ -891,7 +865,6 @@ def handle_update(update):
                             )
                             return
 
-                        # Delivery succeeded: now charge the exact configured amount.
                         if not deduct_balance(user_id, total_cost):
                             for p, l, oid in purchased_list:
                                 add_stock_item(p, l)
@@ -918,7 +891,6 @@ def handle_update(update):
                         )
                         return
 
-               # Search User by Username
                 if is_admin and isinstance(state_data, str) and state_data == "ADMIN_SEARCH_USER":
                     u_info = get_user_by_username(text)
                     if not u_info:
@@ -932,7 +904,6 @@ def handle_update(update):
                     delete_user_state(user_id)
                     return
 
-                # Change Number Price
                 if is_admin and state_data == "ADMIN_SET_PRICE":
                     try:
                         price_text = text.strip()
@@ -946,7 +917,6 @@ def handle_update(update):
                     delete_user_state(user_id)
                     return
 
-                # Dynamic Force Join Set
                 if is_admin and state_data == "ADMIN_SET_CHANNELS":
                     ch_list = [c.strip() for c in text.split(",") if c.strip()]
                     if len(ch_list) > 2:
@@ -957,7 +927,6 @@ def handle_update(update):
                     delete_user_state(user_id)
                     return
 
-                # Deposit Step 1: Amount
                 if isinstance(state_data, dict) and state_data.get("step") == "WAITING_AMOUNT":
                     method = state_data["method"]
                     try:
@@ -996,7 +965,6 @@ def handle_update(update):
                         send_message(chat_id, "❌ <b>ভুল ইনপুট!</b> কেবল সংখ্যা লিখুন। (যেমন: 120 বা 5)")
                         return
 
-                # Deposit Step 2: TrxID
                 elif isinstance(state_data, dict) and state_data.get("step") == "WAITING_TRX":
                     set_user_state(user_id, {
                         "step": "WAITING_SCREENSHOT",
@@ -1007,7 +975,6 @@ def handle_update(update):
                     send_message(chat_id, "📸 <b>ধন্যবাদ! এবার পেমেন্টের একটি স্পষ্ট স্ক্রিনশট (Photo) পাঠান:</b>", reply_markup=get_back_keyboard())
                     return
 
-                # Deposit Step 3: Screenshot
                 elif isinstance(state_data, dict) and state_data.get("step") == "WAITING_SCREENSHOT":
                     if "photo" in msg:
                         photo_file_id = msg["photo"][-1]["file_id"]
@@ -1049,44 +1016,43 @@ def handle_update(update):
                         send_message(chat_id, "❌ <b>অনুগ্রহ করে পেমেন্টের একটি ছবি/স্ক্রিনশট পাঠান।</b>", reply_markup=get_back_keyboard())
                         return
 
-                # Admin File Upload
-    elif is_admin and state_data == "ADMIN_UPLOAD_FILE":
-        if "document" in msg:
-            doc = msg["document"]
-            file_name = doc.get("file_name", "").lower()
-            if not (file_name.endswith(".txt") or file_name.endswith(".csv")):
-                send_message(chat_id, "❌ <b>দয়া করে শুধুমাত্র .txt অথবা .csv ফাইল আপলোড করুন!</b>")
-                return
+                elif is_admin and state_data == "ADMIN_UPLOAD_FILE":
+                    if "document" in msg:
+                        doc = msg["document"]
+                        file_name = doc.get("file_name", "").lower()
+                        if not (file_name.endswith(".txt") or file_name.endswith(".csv")):
+                            send_message(chat_id, "❌ <b>দয়া করে শুধুমাত্র .txt অথবা .csv ফাইল আপলোড করুন!</b>", reply_markup=get_back_keyboard())
+                            return
 
-            file_id = doc["file_id"]
-            file_info = requests.get(BASE_URL + f"getFile?file_id={file_id}").json()
-            if file_info.get("ok"):
-                file_path = file_info["result"]["file_path"]
-                content = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").text
+                        file_id = doc["file_id"]
+                        file_info = requests.get(BASE_URL + f"getFile?file_id={file_id}").json()
+                        if file_info.get("ok"):
+                            file_path = file_info["result"]["file_path"]
+                            content = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").text
+                            
+                            count = 0
+                            for line in content.splitlines():
+                                line = line.strip().lstrip("\ufeff")
+                                if not line:
+                                    continue
 
-                count = 0
-                for line in content.splitlines():
-                    line = line.strip().lstrip("\ufeff")
-                    if not line:
-                        continue
+                                parts = [p.strip() for p in line.split(",", 1)]
+                                if len(parts) != 2:
+                                    parts = line.split(None, 1)
 
-                    # Split line by whitespace (space or tab) to separate phone and otp link
-                    parts = line.split(None, 1)
+                                if len(parts) == 2:
+                                    phone, otp_link = parts[0].strip(), parts[1].strip()
+                                    if phone.startswith("+") and (otp_link.startswith("http://") or otp_link.startswith("https://")):
+                                        add_stock_item(phone, otp_link)
+                                        count += 1
+                            
+                            send_message(chat_id, f"✅ <b>সফলভাবে {count} টি নম্বর স্টকে আপলোড করা হয়েছে!</b>", reply_markup=get_main_keyboard(is_admin))
+                            delete_user_state(user_id)
+                            return
+                    else:
+                        send_message(chat_id, "❌ <b>অনুগ্রহ করে একটি সঠিক টেক্সট (.txt / .csv) ফাইল আপলোড করুন।</b>", reply_markup=get_back_keyboard())
+                        return
 
-                    if len(parts) == 2:
-                        phone, otp_link = parts[0].strip(), parts[1].strip()
-                        if phone.startswith("+") and (otp_link.startswith("http://") or otp_link.startswith("https://")):
-                            add_stock_item(phone, otp_link)
-                            count += 1
-
-                send_message(chat_id, f"✅ <b>সফলভাবে {count} টি নম্বর স্টকে আপলোড করা হয়েছে!</b>")
-                delete_user_state(user_id)
-                return
-            else:
-                send_message(chat_id, "❌ <b>ফাইল ডাউনলোড করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।</b>")
-                return
-
-                # Admin Custom Deposit Input
                 elif isinstance(state_data, str) and state_data.startswith("ADMIN_APPROVE_AMOUNT_"):
                     target_user = int(state_data.replace("ADMIN_APPROVE_AMOUNT_", ""))
                     try:
@@ -1099,7 +1065,6 @@ def handle_update(update):
                     delete_user_state(user_id)
                     return
 
-                # Admin Refund Input
                 elif isinstance(state_data, str) and state_data.startswith("ADMIN_REFUND_USER_"):
                     target_user = int(state_data.replace("ADMIN_REFUND_USER_", ""))
                     try:
@@ -1119,7 +1084,6 @@ def handle_update(update):
                     delete_user_state(user_id)
                     return
 
-                # Admin Broadcast
                 elif isinstance(state_data, str) and state_data == "ADMIN_BROADCAST":
                     all_users = get_all_users()
                     success, failed = 0, 0
@@ -1137,8 +1101,6 @@ def handle_update(update):
                     delete_user_state(user_id)
                     return
 
-         
-            # Main Keyboards Handling
             if text == "/start":
                 welcome_text = f"👋 <b>Welcome {html.escape(first_name)}!</b>\n\nনিচের মেনু থেকে সার্ভিস সিলেক্ট করুন:"
                 send_message(chat_id, welcome_text, reply_markup=get_main_keyboard(is_admin))
@@ -1239,7 +1201,6 @@ def handle_update(update):
             if data == "noop":
                 return
 
-            # VPN Buy Callbacks with stock check, confirmation and safe rollback
             if data.startswith("buy_vpn_"):
                 service = "nord" if data == "buy_vpn_nord" else "proton"
                 pr = to_decimal(get_vpn_price(service))
@@ -1294,7 +1255,6 @@ def handle_update(update):
                     edit_message(chat_id, message_id, "⚠️ <b>দুঃখিত! এই VPN-এর স্টক এখন শেষ।</b> আপনার ব্যালেন্স কাটা হয়নি।")
                     return
 
-                # Atomic balance deduction prevents double-click overspending.
                 if not deduct_balance(user_id, pr):
                     edit_message(
                         chat_id, message_id,
@@ -1304,7 +1264,6 @@ def handle_update(update):
 
                 account = pop_vpn_stock_item(service)
                 if not account:
-                    # Stock disappeared between the check and reservation: refund immediately.
                     add_refund_balance(user_id, pr)
                     edit_message(chat_id, message_id, "⚠️ <b>স্টক রিজার্ভ করা যায়নি।</b> আপনার টাকা সম্পূর্ণ ফেরত দেওয়া হয়েছে।")
                     return
@@ -1332,7 +1291,6 @@ def handle_update(update):
                 admin_result = send_message(ADMIN_ID, admin_notif)
 
                 if not admin_result.get("ok"):
-                    # Admin notification failed; restore stock and refund the user.
                     vpn_orders_col.update_one({"_id": ObjectId(order_id)}, {"$set": {"status": "CANCELLED", "updated_at": datetime.now()}})
                     add_vpn_stock_item(service, account)
                     add_refund_balance(user_id, pr)
@@ -1351,7 +1309,6 @@ def handle_update(update):
                 edit_message(chat_id, message_id, "❌ <b>VPN অর্ডার বাতিল করা হয়েছে।</b>\nআপনার ব্যালেন্স থেকে কোনো টাকা কাটা হয়নি।")
                 return
 
-            # Bot Status Toggle Callback
             if data == "admin_toggle_bot_off" and is_admin:
                 set_bot_status("OFF")
                 admin_msg, admin_markup = get_admin_panel_data()
@@ -1377,7 +1334,6 @@ def handle_update(update):
                 u_info = get_user(user_id)
                 bal = u_info[2] if u_info else 0.0
 
-                # Fixed Floating-Point Balance Check Issue
                 if to_decimal(bal) < to_decimal(current_price):
                     edit_message(chat_id, message_id, f"❌ <b>পর্যাপ্ত ব্যালেন্স নেই!</b>\nনম্বর কিনতে অন্তত ${format_number_price(current_price)} USD ব্যালেন্স লাগবে। Deposit সেকশন থেকে রিচার্জ করুন।")
                     return
@@ -1401,8 +1357,6 @@ def handle_update(update):
                     f"👉 নম্বরটি অ্যাপে ব্যবহার করার পর <b>Check OTP</b> বাটনে চাপ দিন।"
                 )
 
-                # Create the order before delivery so OTP tracking is ready.
-                # No balance is charged until Telegram confirms delivery.
                 try:
                     order_id = save_active_order(user_id, phone, link)
                     if order_id is None:
@@ -1428,7 +1382,6 @@ def handle_update(update):
                     )
                     return
 
-                # Telegram confirmed delivery: now charge the exact configured price.
                 if not deduct_balance(user_id, current_price):
                     add_stock_item(phone, link)
                     delete_active_order(order_id)
@@ -1441,7 +1394,6 @@ def handle_update(update):
 
                 send_message(chat_id, "<b>মূল মেনু:</b>", reply_markup=get_main_keyboard(is_admin))
 
-
             elif data.startswith("chk_otp_"):
                 phone = data.replace("chk_otp_", "", 1)
                 order = get_order_by_phone(phone)
@@ -1449,41 +1401,30 @@ def handle_update(update):
                     send_message(chat_id, "❌ <b>অর্ডারটি পাওয়া যায়নি!</b>")
                     return
 
-                link = order[2]  # মূল ওটিপি পেজের লিংক
+                link = order[2]
                 if not link:
                     send_message(chat_id, "❌ <b>এই অর্ডারের OTP link পাওয়া যায়নি।</b>")
                     return
 
                 try:
-                    import requests
-                    import re
-        
-                    # সোর্স কোডের নিয়ম অনুযায়ী এপিআই লিংক তৈরি
                     api_link = link.replace("/sms/", "/api/sms/")
-        
                     response = requests.get(api_link, timeout=10)
                     otp_text = response.text.strip()
         
                     if re.match(r"^\d{3,10}$", otp_text):
                         message = f"<b>Your WhatsApp OTP:</b> <code>{otp_text}</code>"
             
-                        # --- Railway Variable থেকে গ্রুপ আইডি রিড করা ---
                         group_chat_id = os.getenv("OTP_GROUP_ID")
                         if group_chat_id:
                             group_message = f"🔔 <b>New WhatsApp OTP Received!</b>\n📱 Number: <code>{phone}</code>\n🔑 OTP: <code>{otp_text}</code>"
                             send_message(int(group_chat_id), group_message)
-                        # -----------------------------------------------
-            
                     else:
                         message = "⏳ <b>এখনো ওটিপি আসেনি বা কোড পাওয়া যায়নি। একটু পরে আবার চেক করুন।</b>"
             
                     send_message(chat_id, message)
-        
                 except Exception as e:
                     send_message(chat_id, "❌ <b>ওটিপি চেক করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।</b>")
-        
 
-                        # Requirement #2: Inline Admin Panel Navigation with edit_message
             elif data == "admin_panel_back" and is_admin:
                 admin_msg, admin_markup = get_admin_panel_data()
                 edit_message(chat_id, message_id, admin_msg, reply_markup=admin_markup)
@@ -1556,7 +1497,6 @@ def handle_update(update):
                 set_user_state(user_id, "ADMIN_SEARCH_USER")
                 send_message(chat_id, "🔎 <b>ইউজারের Username টি লিখে পাঠান:</b>\n(যেমন: `@username` বা `username`)", reply_markup=get_back_keyboard())
 
-            # PAGINATION CALLBACK FOR ACTIVE BUYERS PAGE NAVIGATION
             elif (data.startswith("pb_") or data.startswith("insp_b_") or data.startswith("inspect_buyer_")) and is_admin:
                 clean_data = data.replace("insp_b_", "").replace("inspect_buyer_", "")
                 if clean_data.startswith("pb_"):
@@ -1570,7 +1510,6 @@ def handle_update(update):
                 buyer_msg, buyer_markup = render_buyer_page(target_u_id, page=page_num)
                 edit_message(chat_id, message_id, buyer_msg, reply_markup=buyer_markup)
 
-            # PAGINATION CALLBACK FOR USER DETAILS PAGE NAVIGATION
             elif (data.startswith("pu_") or data.startswith("insp_u_") or data.startswith("inspect_u_")) and is_admin:
                 clean_data = data.replace("insp_u_", "").replace("inspect_u_", "")
                 if clean_data.startswith("pu_"):
@@ -1700,7 +1639,6 @@ def safe_execution_wrapper(upd):
         handle_update(upd)
     except Exception as e:
         print(f"Exception Handled Safety: {e}")
-
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
