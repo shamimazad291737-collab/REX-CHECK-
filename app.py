@@ -1437,30 +1437,45 @@ def handle_update(update):
 
 
             elif data.startswith("chk_otp_"):
-                # Check OTP safely by opening the order's provider link.
-                # This bot does not fetch or extract authentication codes from third-party pages.
-                phone = data.replace("chk_otp_", "", 1)
-                order = get_order_by_phone(phone)
-                if not order:
-                    send_message(chat_id, "❌ <b>অর্ডারটি পাওয়া যায়নি।</b>")
-                    return
+    phone = data.replace("chk_otp_", "", 1)
+    order = get_order_by_phone(phone)
+    if not order:
+        send_message(chat_id, "❌ <b>অর্ডারটি পাওয়া যায়নি!</b>")
+        return
 
-                link = order[2]
-                if not link:
-                    send_message(chat_id, "❌ <b>এই অর্ডারের OTP link পাওয়া যায়নি।</b>")
-                    return
+    link = order[2]  # মূল ওটিপি পেজের লিংক
+    if not link:
+        send_message(chat_id, "❌ <b>এই অর্ডারের OTP link পাওয়া যায়নি।</b>")
+        return
 
-                markup = {
-                    "inline_keyboard": [
-                        [{"text": "🔍 Open OTP Link", "url": link}],
-                        [{"text": "🛒 Buy Another Number", "callback_data": "confirm_buy_usa"}]
-                    ]
-                }
-                send_message(
-                    chat_id,
-                    "🔍 <b>OTP Check</b>\n\nনিচের বাটনে চাপ দিয়ে আপনার অর্ডারের OTP page খুলুন।",
-                    reply_markup=markup
-                )
+    try:
+        import requests
+        import re
+        
+        # সোর্স কোডের নিয়ম অনুযায়ী এপিআই লিংক তৈরি
+        api_link = link.replace("/sms/", "/api/sms/")
+        
+        response = requests.get(api_link, timeout=10)
+        otp_text = response.text.strip()
+        
+        if re.match(r"^\d{3,10}$", otp_text):
+            message = f"<b>Your WhatsApp OTP:</b> <code>{otp_text}</code>"
+            
+            # --- Railway Variable থেকে গ্রুপ আইডি রিড করা ---
+            group_chat_id = os.getenv("OTP_GROUP_ID")
+            if group_chat_id:
+                group_message = f"🔔 <b>New WhatsApp OTP Received!</b>\n📱 Number: <code>{phone}</code>\n🔑 OTP: <code>{otp_text}</code>"
+                send_message(int(group_chat_id), group_message)
+            # -----------------------------------------------
+            
+        else:
+            message = "⏳ <b>এখনো ওটিপি আসেনি বা কোড পাওয়া যায়নি। একটু পরে আবার চেক করুন।</b>"
+            
+        send_message(chat_id, message)
+        
+    except Exception as e:
+        send_message(chat_id, "❌ <b>ওটিপি চেক করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।</b>")
+        
 
             # Requirement #2: Inline Admin Panel Navigation with edit_message
             elif data == "admin_panel_back" and is_admin:
