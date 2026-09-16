@@ -1065,21 +1065,19 @@ def handle_update(update):
                             content = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").text
                             
                             count = 0
-                            for line in content.splitlines():
-                                line = line.strip().lstrip("\ufeff")
-                                if not line:
-                                    continue
+                for line in content.splitlines():
+                    line = line.strip().lstrip("\ufeff")
+                    if not line:
+                        continue
 
-                                # Upload format: NUMBER, OTP LINK only
-                                parts = [p.strip() for p in line.split(",", 1)]
-                                if len(parts) != 2:
-                                    parts = line.split(None, 1)
+                    # Split line by whitespace (space or tab) to separate phone and otp link
+                    parts = line.split(None, 1)
 
-                                if len(parts) == 2:
-                                    phone, otp_link = parts[0].strip(), parts[1].strip()
-                                    if phone.startswith("+") and (otp_link.startswith("http://") or otp_link.startswith("https://")):
-                                        add_stock_item(phone, otp_link)
-                                        count += 1
+                    if len(parts) == 2:
+                        phone, otp_link = parts[0].strip(), parts[1].strip()
+                        if phone.startswith("+") and (otp_link.startswith("http://") or otp_link.startswith("https://")):
+                            add_stock_item(phone, otp_link)
+                            count += 1
                             
                             send_message(chat_id, f"✅ <b>সফলভাবে {count} টি নম্বর স্টকে আপলোড করা হয়েছে!</b>", reply_markup=get_main_keyboard(is_admin))
                             delete_user_state(user_id)
