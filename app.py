@@ -1677,11 +1677,11 @@ def handle_update(update):
             elif data.startswith("chk_otp_"):
                 phone = data.replace("chk_otp_", "", 1)
 
-                # Only a 40-second countdown; existing OTP check logic below is unchanged.
-                countdown = send_message(chat_id, "⏳ <b>Check OTP</b> — 40 seconds remaining...")
+                # Only a 10-second countdown; existing OTP check logic below is unchanged.
+                countdown = send_message(chat_id, "⏳ <b>Check OTP</b> — 10 seconds remaining...")
                 if countdown.get("ok"):
                     countdown_message_id = countdown.get("result", {}).get("message_id")
-                    for remaining in range(39, -1, -1):
+                    for remaining in range(9, -1, -1):
                         time.sleep(1)
                         if countdown_message_id:
                             edit_message(chat_id, countdown_message_id, f"⏳ <b>Check OTP</b> — {remaining} seconds remaining...")
