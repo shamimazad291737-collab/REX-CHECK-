@@ -1,58 +1,29 @@
 import concurrent.futures
+import logging
 import re
 import time
 import urllib.request
-from flask import Flask, render_template_string
+from telegram import ReplyKeyboardMarkup, Update
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
-app = Flask(__name__)
+# আপনার টেলিগ্রাম বটের টোকেন এখানে বসাবেন
+TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
 
-# ==========================================
-# আপনার নম্বর এবং লিংকের তালিকা এখানে সরাসরি দিন
-# ==========================================
-data_list = [
-    (
-        "+13082573334",
-        "http://169.58.215.134:11111/sms/wa-dQ85Bqbru9-9rts-CwhK-zfSEPQYpqFq/6",
-    ),
-    (
-        "+15177144880",
-        "http://169.58.215.134:11111/sms/wa-nd7K_z2Re19orVDJTpFFZfNNUMEIzEs2/6",
-    ),
-    (
-        "+19717777024",
-        "http://169.58.215.134:11111/sms/wa-sBImpwBbyiiGxIsTzgl2KIB6fOvJK2nJ/6",
-    ),
-    (
-        "+15853004453",
-        "http://169.58.215.134:11111/sms/wa-fmlhskEwV94MOV1cXvgG60H-6w1NLAA-/6",
-    ),
-    (
-        "+19592143777",
-        "http://169.58.215.134:11111/sms/wa-sguLHw24TEx_-Tv8SubNAlBDDP4Y9uUN/6",
-    ),
-    (
-        "+18153103733",
-        "http://169.58.215.134:11111/sms/wa-tRPnrt6VUnMsvcGlGyVhAS1BvkerUEUr/6",
-    ),
-    (
-        "+15082051859",
-        "http://169.58.215.134:11111/sms/wa-yWJW_To00HbHMDHFiQKPdZIw98kHGYbj/6",
-    ),
-    (
-        "+13345814820",
-        "http://169.58.215.134:11111/sms/wa-u19MD_LFLD5echJMAW_-GMNMbG-iMTr3/6",
-    ),
-]
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
 
 
-def check_single_otp(index, phone, url):
+def check_single_otp(phone, url):
   start_time = time.time()
   try:
     base_parts = url.split("/sms/")
     api_url = base_parts[0] + "/api/sms/" + base_parts[1]
   except Exception:
-    return index, phone, None, False
+    return phone, None, False
 
+  # ৫ সেকেন্ড পর্যন্ত ওটিপির জন্য ট্রাই করবে
   while time.time() - start_time < 5:
     try:
       req = urllib.request.Request(
@@ -62,99 +33,129 @@ def check_single_otp(index, phone, url):
         content = response.read().decode("utf-8").strip()
         match = re.search(r"\b\d{5,6}\b", content)
         if match:
-          return index, phone, match.group(0), True
+          return phone, match.group(0), True
     except Exception:
       pass
     time.sleep(1)
 
-  return index, phone, None, False
+  return phone, None, False
 
 
-# HTML ডিজাইন (যাতে ব্রাউজারে বা Render-এ লাইভ স্ট্যাটাস সুন্দর দেখায়)
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>REX Number & OTP Checker</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 20px; }
-        .container { max-width: 600px; margin: auto; background: #1e293b; padding: 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-        h2 { text-align: center; color: #38bdf8; }
-        .stats { display: flex; justify-content: space-around; background: #334155; padding: 10px; border-radius: 5px; margin-bottom: 20px; font-weight: bold; }
-        ul { list-style: none; padding: 0; }
-        li { background: #334155; margin-bottom: 8px; padding: 10px 15px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
-        .success { color: #4ade80; font-weight: bold; }
-        .failed { color: #f87171; }
-        .btn { display: block; width: 100%; background: #0284c7; color: white; border: none; padding: 10px; font-size: 16px; border-radius: 5px; cursor: pointer; text-align: center; text-decoration: none; margin-top: 15px; }
-        .btn:hover { background: #0369a1; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>🚀 REX OTP Checker</h2>
-        <div class="stats">
-            <div>✅ Received: {{ received }}</div>
-            <div>❌ Failed: {{ failed }}</div>
-            <div>📦 Total: {{ total }}</div>
-        </div>
-        <ul>
-            {% for item in results %}
-                <li>
-                    <span>{{ item.index }}. 📱 {{ item.phone }}</span>
-                    {% if item.otp %}
-                        <span class="success">✅ {{ item.otp }}</span>
-                    {% else %}
-                        <span class="failed">❌ নাই</span>
-                    {% endif %}
-                </li>
-            {% endfor %}
-        </ul>
-        <a href="/" class="btn">🔄 Refresh / Re-check</a>
-    </div>
-</body>
-</html>
-"""
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  keyboard = [["📂 How to Use", "⚡ Status Checker"]]
+  reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+  welcome_text = (
+      "👋 **স্বাগতম! REX OTP Checker বোটে।**\n\n"
+      "দয়া করে আপনার `.txt` ফাইল আপলোড করুন অথবা নম্বর ও লিংকের তালিকা একসাথে চ্যাটে পেস্ট করুন।"
+  )
+  await update.message.reply_text(
+      welcome_text, parse_mode="Markdown", reply_markup=reply_markup
+  )
 
 
-@app.route("/")
-def index():
-  total_links = len(data_list)
-  results_data = [None] * total_links
+async def handle_document_or_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  message = update.message
+  raw_text = ""
+
+  if message.text == "📂 How to Use":
+    await message.reply_text(
+        "ℹ️ **ব্যবহারের নিয়ম:**\n"
+        "ফাইল বা টেক্সটে নিচের ফরম্যাটে ডাটা দিতে হবে:\n\n"
+        "`+13082573334 http://169.58.215.134:11111/sms/...`",
+        parse_mode="Markdown",
+    )
+    return
+  elif message.text == "⚡ StatusChecker":
+    await message.reply_text("⚡ চেকার প্রস্তুত! আপনার ডেটা সেন্ড করুন।")
+    return
+
+  # যদি ইউজার ফাইল (.txt) আপলোড করে
+  if message.document:
+    if not message.document.file_name.endswith(".txt"):
+      await message.reply_text(
+          "❌ দয়া করে শুধুমাত্র `.txt` ফাইল আপলোড করুন।"
+      )
+      return
+
+    file = await message.document.get_file()
+    file_bytes = await file.download_as_bytearray()
+    raw_text = file_bytes.decode("utf-8", errors="ignore")
+
+  # যদি ইউজার সরাসরি টেক্সট পেস্ট করে
+  elif message.text:
+    raw_text = message.text
+
+  if not raw_text.strip():
+    return
+
+  # টেক্সট থেকে নম্বর এবং লিংক আলাদা করা
+  pattern = r"(\+\d+)\s+(http[^\s]+)"
+  matches = re.findall(pattern, raw_text)
+
+  if not matches:
+    await message.reply_text(
+        "❌ ফরম্যাট সঠিক নয়!\nসঠিক ফরম্যাট:\n`+13082573334 http://169.58.215.134:11111/...`",
+        parse_mode="Markdown",
+    )
+    return
+
+  total_links = len(matches)
+  progress_msg = await message.reply_text(
+      f"⏳ মোট `{total_links}` টি নম্বর চেক করা হচ্ছে, একটু অপেক্ষা করুন..."
+  )
+
   received_count = 0
   failed_count = 0
+  results_output = []
 
-  # মাল্টিথ্রেডিং দিয়ে খুব দ্রুত সব চেক করা
+  # মাল্টিথ্রেডিং দিয়ে একসাথে সব চেক করা
   with concurrent.futures.ThreadPoolExecutor(
       max_workers=min(10, total_links)
   ) as executor:
     futures = [
-        executor.submit(check_single_otp, i, phone, url)
-        for i, (phone, url) in enumerate(data_list, start=1)
+        executor.submit(check_single_otp, phone, url) for phone, url in matches
     ]
 
-    for future in concurrent.futures.as_completed(futures):
-      idx, phone, otp, success = future.result()
-      results_data[idx - 1] = {
-          "index": idx,
-          "phone": phone,
-          "otp": otp,
-          "success": success,
-      }
+    for i, future in enumerate(
+        concurrent.futures.as_completed(futures), start=1
+    ):
+      phone, otp, success = future.result()
       if success:
+        results_output.append(f"{i}. `📱 {phone}` ➔ ✅ **{otp}**")
         received_count += 1
       else:
+        results_output.append(f"{i}. `📱 {phone}` ➔ ❌ নাই")
         failed_count += 1
 
-  return render_template_string(
-      HTML_TEMPLATE,
-      results=results_data,
-      received=received_count,
-      failed=failed_count,
-      total=total_links,
+  # ফাইনাল রিপোর্ট পাঠানো
+  report = (
+      f"📊 **OTP Check Results:**\n\n" + "\n".join(results_output) + f"\n\n"
   )
+  report += f"====================\n"
+  report += f"✅ পাওয়া গেছে: `{received_count}` টি\n"
+  report += f"❌ পাওয়া যায়নি: `{failed_count}` টি\n"
+  report += f"📦 মোট চেক: `{total_links}` টি"
+
+  await progress_msg.edit_text(report, parse_mode="Markdown")
+
+
+def main():
+  app = ApplicationBuilder().token(TOKEN).build()
+
+  app.add_handler(
+      MessageHandler(filters.COMMAND & filters.Regex("^/start$"), start_command)
+  )
+  app.add_handler(
+      MessageHandler(
+          filters.Document.ALL | filters.TEXT & ~filters.COMMAND,
+          handle_document_or_text,
+      )
+  )
+
+  print("🤖 Telegram Bot সফলভাবে রান হচ্ছে...")
+  app.run_polling()
 
 
 if __name__ == "__main__":
-  app.run(host="0.0.0.0", port=5000)
+  main()
