@@ -7,7 +7,7 @@ from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
 # আপনার টেলিগ্রাম বটের টোকেন এখানে বসাবেন
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
+TOKEN = "8590078888:AAEyOrTpOc8J6Hd0hKvU5toKNLXyAZBMSEc"
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
